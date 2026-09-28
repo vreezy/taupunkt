@@ -1,0 +1,168 @@
+# Taupunkt-Lüftung – Home Assistant Package
+# Portierung der Logik aus MakeMagazinDE/Taupunktluefter (Taupunkt_Lueftung.ino)
+#
+# Einbinden über configuration.yaml:
+#   homeassistant:
+#     packages:
+#       taupunkt: !include taupunkt.yml
+#
+# Dummy-Entitäten – bitte durch die eigenen ersetzen:
+#   sensor.innen_temperatur    / sensor.innen_luftfeuchte
+#   sensor.aussen_temperatur   / sensor.aussen_luftfeuchte
+#   switch.luefter_steckdose
+#
+# Schaltlogik (wie im Original):
+#   Delta-TP = Taupunkt innen - Taupunkt außen
+#   EIN  wenn Delta-TP > SCHALTmin + HYSTERESE (5 + 1 = 6 °C)
+#   AUS  wenn Delta-TP < SCHALTmin (5 °C)
+#   AUS  wenn Innentemperatur < 10 °C oder Außentemperatur < -10 °C
+#   Zusätzlich (Erweiterung, nicht im Original) – Innen-Luftfeuchte mit Hysterese:
+#   EIN  nur wenn Innen-Luftfeuchte >= 70 % (und Delta-TP > 6 °C)
+#   AUS  wenn Innen-Luftfeuchte < 65 %
+#   AUS  wenn ein Sensor ungültige Werte liefert
+#   Dazwischen (Delta-TP 5–6 °C bzw. Feuchte 65–70 %) bleibt der aktuelle
+#   Zustand erhalten (Hysterese).
+#
+# Beispielwerte (TP = Taupunkt, berechnet mit der Formel unten):
+#
+#   | Innen T | Innen rF | TP innen | Außen T | Außen rF | TP außen | Delta-TP | Lüfter |
+#   |---------|----------|----------|---------|----------|----------|----------|--------|
+#   |  20 °C  |   70 %   |  14,4 °C |  10 °C  |   60 %   |   2,6 °C |  11,8 °C | AN     |
+#   |  18 °C  |   80 %   |  14,5 °C |   5 °C  |   80 %   |   1,8 °C |  12,7 °C | AN     |
+#   |  12 °C  |   75 %   |   7,7 °C |   0 °C  |   70 %   |  -4,8 °C |  12,5 °C | AN     |
+#   |  22 °C  |   55 %   |  12,5 °C |  12 °C  |   60 %   |   4,5 °C |   8,1 °C | AUS (innen < 65 % rF) |
+#   |  14 °C  |   65 %   |   7,5 °C |   5 °C  |   75 %   |   0,9 °C |   6,6 °C | bleibt (rF 65–70 %)  |
+#   |  17 °C  |   70 %   |  11,5 °C |  10 °C  |   70 %   |   4,8 °C |   6,7 °C | AN     |
+#   |  18 °C  |   70 %   |  12,5 °C |  11 °C  |   75 %   |   6,7 °C |   5,7 °C | bleibt |
+#   |  18 °C  |   60 %   |  10,1 °C |  10 °C  |   70 %   |   4,8 °C |   5,3 °C | AUS (innen < 65 % rF) |
+#   |  15 °C  |   70 %   |   9,6 °C |   8 °C  |   85 %   |   5,6 °C |   3,9 °C | AUS    |
+#   |  20 °C  |   60 %   |  12,0 °C |  15 °C  |   70 %   |   9,6 °C |   2,4 °C | AUS    |
+#   |  20 °C  |   65 %   |  13,2 °C |  25 °C  |   50 %   |  13,9 °C |  -0,6 °C | AUS    |
+#   |   9 °C  |   90 %   |   7,5 °C |  -5 °C  |   80 %   |  -7,9 °C |  15,4 °C | AUS (innen < 10 °C)  |
+#   |  16 °C  |   70 %   |  10,5 °C | -12 °C  |   80 %   | -14,7 °C |  25,3 °C | AUS (außen < -10 °C) |
+#
+#   "bleibt" = Hysteresebereich, der Lüfter behält seinen letzten Zustand.
+#   Beispiel: Läuft der Lüfter bei 20 °C / 72 % innen und 10 °C / 60 % außen
+#   (Delta-TP ≈ 12 °C), bleibt er an, bis die Innenfeuchte unter 65 % fällt
+#   oder Delta-TP unter 5 °C sinkt.
+#
+# Formel: Magnus-Formel (Parameter wie auf wetterochs.de / DWD-üblich)
+#   T >= 0 °C: a = 7,5, b = 237,3   |   T < 0 °C: a = 7,6, b = 240,7 (über Wasser)
+#   SDD = 6,1078 * 10^((a*T)/(b+T))   Sättigungsdampfdruck in hPa
+#   DD  = rF/100 * SDD                Dampfdruck in hPa
+#   v   = log10(DD/6,1078)
+#   TD  = b*v / (a-v)                 Taupunkt in °C
+
+template:
+  - sensor:
+      - name: "Taupunkt innen"
+        unique_id: taupunkt_innen
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        availability: >
+          {% set t = states('sensor.innen_temperatur') %}
+          {% set h = states('sensor.innen_luftfeuchte') %}
+          {{ t | is_number and h | is_number
+             and -40 <= t | float <= 80 and 1 <= h | float <= 100 }}
+        state: >
+          {% set t = states('sensor.innen_temperatur') | float %}
+          {% set r = states('sensor.innen_luftfeuchte') | float %}
+          {% set a = 7.5 if t >= 0 else 7.6 %}
+          {% set b = 237.3 if t >= 0 else 240.7 %}
+          {% set sdd = 6.1078 * 10 ** ((a * t) / (b + t)) %}
+          {% set dd = sdd * r / 100 %}
+          {% set v = log(dd / 6.1078, 10) %}
+          {{ ((b * v) / (a - v)) | round(2) }}
+
+      - name: "Taupunkt aussen"
+        unique_id: taupunkt_aussen
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        availability: >
+          {% set t = states('sensor.aussen_temperatur') %}
+          {% set h = states('sensor.aussen_luftfeuchte') %}
+          {{ t | is_number and h | is_number
+             and -40 <= t | float <= 80 and 1 <= h | float <= 100 }}
+        state: >
+          {% set t = states('sensor.aussen_temperatur') | float %}
+          {% set r = states('sensor.aussen_luftfeuchte') | float %}
+          {% set a = 7.5 if t >= 0 else 7.6 %}
+          {% set b = 237.3 if t >= 0 else 240.7 %}
+          {% set sdd = 6.1078 * 10 ** ((a * t) / (b + t)) %}
+          {% set dd = sdd * r / 100 %}
+          {% set v = log(dd / 6.1078, 10) %}
+          {{ ((b * v) / (a - v)) | round(2) }}
+
+      - name: "Taupunkt Differenz"
+        unique_id: taupunkt_differenz
+        unit_of_measurement: "°C"
+        state_class: measurement
+        availability: >
+          {{ states('sensor.taupunkt_innen') | is_number
+             and states('sensor.taupunkt_aussen') | is_number }}
+        state: >
+          {{ (states('sensor.taupunkt_innen') | float
+              - states('sensor.taupunkt_aussen') | float) | round(2) }}
+
+automation:
+  - id: taupunkt_lueftung
+    alias: "Taupunkt-Lüftung"
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id:
+          - sensor.taupunkt_differenz
+          - sensor.innen_temperatur
+          - sensor.aussen_temperatur
+          - sensor.innen_luftfeuchte
+      - trigger: time_pattern
+        minutes: "/5"
+      - trigger: homeassistant
+        event: start
+    variables:
+      schalt_min: 5.0      # SCHALTmin: minimaler Taupunktunterschied
+      hysterese: 1.0       # HYSTERESE: Abstand Ein-/Ausschaltpunkt
+      temp_innen_min: 10.0 # TEMP1_min
+      temp_aussen_min: -10.0 # TEMP2_min
+      feuchte_innen_aus: 65.0 # Innen-Luftfeuchte (%), unter der ausgeschaltet wird
+      feuchte_innen_ein: 70.0 # Innen-Luftfeuchte (%), ab der eingeschaltet werden darf
+      delta: "{{ states('sensor.taupunkt_differenz') }}"
+      t_innen: "{{ states('sensor.innen_temperatur') }}"
+      t_aussen: "{{ states('sensor.aussen_temperatur') }}"
+      h_innen: "{{ states('sensor.innen_luftfeuchte') }}"
+    actions:
+      - choose:
+          # Sensorfehler, Mindesttemperatur oder Mindestfeuchte unterschritten -> AUS
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ not (delta | is_number and t_innen | is_number and t_aussen | is_number
+                          and h_innen | is_number)
+                     or t_innen | float < temp_innen_min
+                     or h_innen | float < feuchte_innen_aus
+                     or t_aussen | float < temp_aussen_min }}
+            sequence:
+              - action: switch.turn_off
+                target:
+                  entity_id: switch.luefter_steckdose
+          # Taupunktdifferenz groß genug und innen feucht genug -> EIN
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ delta | float > schalt_min + hysterese
+                     and h_innen | float >= feuchte_innen_ein }}
+            sequence:
+              - action: switch.turn_on
+                target:
+                  entity_id: switch.luefter_steckdose
+          # Taupunktdifferenz zu klein -> AUS
+          - conditions:
+              - condition: template
+                value_template: "{{ delta | float < schalt_min }}"
+            sequence:
+              - action: switch.turn_off
+                target:
+                  entity_id: switch.luefter_steckdose
+        # Sonst (Delta-TP 5–6 °C oder Feuchte 65–70 %): nichts tun (Hysterese)
