@@ -7,8 +7,8 @@
 #       taupunkt: !include taupunkt.yml
 #
 # Dummy-Entitäten – bitte durch die eigenen ersetzen:
-#   sensor.innen_temperatur    / sensor.innen_luftfeuchte
-#   sensor.aussen_temperatur   / sensor.aussen_luftfeuchte
+#   sensor.atc_19d4_temperatur    / sensor.innen_luftfeuchte
+#   sensor.bthome_sensor_ad36_temperatur   / sensor.bthome_sensor_ad36_luftfeuchtigkeit
 #   switch.luefter_steckdose
 #
 # Schaltlogik (wie im Original):
@@ -61,13 +61,13 @@ template:
         device_class: temperature
         state_class: measurement
         availability: >
-          {% set t = states('sensor.innen_temperatur') %}
-          {% set h = states('sensor.innen_luftfeuchte') %}
+          {% set t = states('sensor.atc_19d4_temperatur') %}
+          {% set h = states('sensor.atc_19d4_luftfeuchtigkeit') %}
           {{ t | is_number and h | is_number
              and -40 <= t | float <= 80 and 1 <= h | float <= 100 }}
         state: >
-          {% set t = states('sensor.innen_temperatur') | float %}
-          {% set r = states('sensor.innen_luftfeuchte') | float %}
+          {% set t = states('sensor.atc_19d4_temperatur') | float %}
+          {% set r = states('sensor.atc_19d4_luftfeuchtigkeit') | float %}
           {% set a = 7.5 if t >= 0 else 7.6 %}
           {% set b = 237.3 if t >= 0 else 240.7 %}
           {% set sdd = 6.1078 * 10 ** ((a * t) / (b + t)) %}
@@ -81,13 +81,13 @@ template:
         device_class: temperature
         state_class: measurement
         availability: >
-          {% set t = states('sensor.aussen_temperatur') %}
-          {% set h = states('sensor.aussen_luftfeuchte') %}
+          {% set t = states('sensor.bthome_sensor_ad36_temperatur') %}
+          {% set h = states('sensor.bthome_sensor_ad36_luftfeuchtigkeit') %}
           {{ t | is_number and h | is_number
              and -40 <= t | float <= 80 and 1 <= h | float <= 100 }}
         state: >
-          {% set t = states('sensor.aussen_temperatur') | float %}
-          {% set r = states('sensor.aussen_luftfeuchte') | float %}
+          {% set t = states('sensor.bthome_sensor_ad36_temperatur') | float %}
+          {% set r = states('sensor.bthome_sensor_ad36_luftfeuchtigkeit') | float %}
           {% set a = 7.5 if t >= 0 else 7.6 %}
           {% set b = 237.3 if t >= 0 else 240.7 %}
           {% set sdd = 6.1078 * 10 ** ((a * t) / (b + t)) %}
@@ -114,9 +114,9 @@ automation:
       - trigger: state
         entity_id:
           - sensor.taupunkt_differenz
-          - sensor.innen_temperatur
-          - sensor.aussen_temperatur
-          - sensor.innen_luftfeuchte
+          - sensor.atc_19d4_temperatur
+          - sensor.bthome_sensor_ad36_temperatur
+          - sensor.atc_19d4_luftfeuchtigkeit
       - trigger: time_pattern
         minutes: "/5"
       - trigger: homeassistant
@@ -129,9 +129,9 @@ automation:
       feuchte_innen_aus: 65.0 # Innen-Luftfeuchte (%), unter der ausgeschaltet wird
       feuchte_innen_ein: 70.0 # Innen-Luftfeuchte (%), ab der eingeschaltet werden darf
       delta: "{{ states('sensor.taupunkt_differenz') }}"
-      t_innen: "{{ states('sensor.innen_temperatur') }}"
-      t_aussen: "{{ states('sensor.aussen_temperatur') }}"
-      h_innen: "{{ states('sensor.innen_luftfeuchte') }}"
+      t_innen: "{{ states('sensor.atc_19d4_temperatur') }}"
+      t_aussen: "{{ states('sensor.bthome_sensor_ad36_temperatur') }}"
+      h_innen: "{{ states('sensor.atc_19d4_luftfeuchtigkeit') }}"
     actions:
       - choose:
           # Sensorfehler, Mindesttemperatur oder Mindestfeuchte unterschritten -> AUS
