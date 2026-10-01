@@ -7,9 +7,9 @@
 #       taupunkt: !include taupunkt.yml
 #
 # Dummy-Entitäten – bitte durch die eigenen ersetzen:
-#   sensor.atc_19d4_temperatur    / sensor.innen_luftfeuchte
+#   sensor.atc_19d4_temperatur    / sensor.atc_19d4_luftfeuchtigkeit
 #   sensor.bthome_sensor_ad36_temperatur   / sensor.bthome_sensor_ad36_luftfeuchtigkeit
-#   switch.luefter_steckdose
+#   switch.erfindergeist_werkstatt_plug_taupunkt
 #
 # Schaltlogik (wie im Original):
 #   Delta-TP = Taupunkt innen - Taupunkt außen
@@ -146,7 +146,7 @@ automation:
             sequence:
               - action: switch.turn_off
                 target:
-                  entity_id: switch.luefter_steckdose
+                  entity_id: switch.erfindergeist_werkstatt_plug_taupunkt
           # Taupunktdifferenz groß genug und innen feucht genug -> EIN
           - conditions:
               - condition: template
@@ -156,7 +156,7 @@ automation:
             sequence:
               - action: switch.turn_on
                 target:
-                  entity_id: switch.luefter_steckdose
+                  entity_id: switch.erfindergeist_werkstatt_plug_taupunkt
           # Taupunktdifferenz zu klein -> AUS
           - conditions:
               - condition: template
@@ -164,5 +164,5 @@ automation:
             sequence:
               - action: switch.turn_off
                 target:
-                  entity_id: switch.luefter_steckdose
+                  entity_id: switch.erfindergeist_werkstatt_plug_taupunkt
         # Sonst (Delta-TP 5–6 °C oder Feuchte 65–70 %): nichts tun (Hysterese)
